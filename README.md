@@ -1,7 +1,8 @@
 [![](https://godoc.org/github.com/Bowbaq/profilecreds?status.svg)](http://godoc.org/github.com/Bowbaq/profilecreds)
 
 # profilecreds
-This provides a credentials provider for https://github.com/aws/aws-sdk-go that reads from ~/.aws/config
+This provides a credentials provider for https://github.com/aws/aws-sdk-go that reads from `~/.aws/config`. This
+is in particular intended to help with assuming a role with MFA on.
 
 ## Example usage
 
