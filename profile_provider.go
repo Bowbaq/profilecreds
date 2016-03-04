@@ -35,12 +35,12 @@ type AssumeRoleProfileProvider struct {
 	// The profile to read from the AWS CLI config file (usually $HOME/.aws/config).
 	ProfileName string
 
-	// Optional cache to use for persisting credentials. This is particularly useful when
-	// using MFA in a CLI application, so as to not enter the token for each run.
+	// Optional cache to use for persisting credentials. This is particularly useful
+	// when using MFA in a CLI application, so as to not enter the token for each run.
 	Cache Cache
 
-	// Optional source for the MFA token. The default is to prompt the user to enter the
-	// token on stdin.
+	// Optional source for the MFA token. The default is to prompt the user to enter
+	// the token on stdin.
 	GetToken TokenSource
 
 	// ExpiryWindow will allow the credentials to trigger refreshing prior to
@@ -52,6 +52,8 @@ type AssumeRoleProfileProvider struct {
 	// 10 seconds before the credentials are actually expired.
 	//
 	// If ExpiryWindow is 0 or less it will be ignored.
+	//
+	// If using MFA, this will fail unless a new token can be provided
 	ExpiryWindow time.Duration
 }
 
@@ -75,12 +77,8 @@ type profile struct {
 	ExternalID *string
 }
 
-// NewCredentials returns a pointer to a new Credentials object wrapping the
-// AssumeRoleProvider. The credentials will expire every 15 minutes and the
-// role will be named after a nanosecond timestamp of this operation.
-//
-// Takes a Config provider to create the STS client. The ConfigProvider is
-// satisfied by the session.Session type.
+// NewCredentials returns a pointer to a new Credentials object retrieved
+// by assuming the specified profile
 func NewCredentials(profileName string, options ...func(*AssumeRoleProfileProvider)) *credentials.Credentials {
 	p := &AssumeRoleProfileProvider{
 		ProfileName: profileName,
@@ -196,19 +194,23 @@ func (p *AssumeRoleProfileProvider) retrieve(prof profile) (credentials.Value, t
 	sess := session.New()
 	client := sts.New(sess, sess.Config.WithCredentials(sourceCreds))
 
-	token, err := p.GetToken()
-	if err != nil {
-		return credentials.Value{ProviderName: ProviderName}, time.Now(), err
-	}
-
-	roleOutput, err := client.AssumeRole(&sts.AssumeRoleInput{
+	params := &sts.AssumeRoleInput{
 		DurationSeconds: aws.Int64(int64(p.Duration / time.Second)),
 		RoleArn:         aws.String(prof.RoleARN),
 		RoleSessionName: prof.RoleSessionName,
 		ExternalId:      prof.ExternalID,
-		SerialNumber:    prof.MFASerial,
-		TokenCode:       &token,
-	})
+	}
+	if prof.MFASerial != nil {
+		params.SerialNumber = prof.MFASerial
+
+		token, err := p.GetToken()
+		if err != nil {
+			return credentials.Value{ProviderName: ProviderName}, time.Now(), err
+		}
+		params.TokenCode = &token
+	}
+
+	roleOutput, err := client.AssumeRole(params)
 	if err != nil {
 		return credentials.Value{ProviderName: ProviderName}, time.Now(), err
 	}
@@ -237,7 +239,7 @@ func (c *creds) IsExpired() bool {
 	return c.Expiration.UTC().Before(time.Now().UTC())
 }
 
-// TokenSource provdes an MFA token
+// TokenSource provides an MFA token
 type TokenSource func() (string, error)
 
 // PromptTokenSource is the default MFA token source. It prompts the user for a token on stdin.
